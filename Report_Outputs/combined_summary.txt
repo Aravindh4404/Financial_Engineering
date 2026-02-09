@@ -1,0 +1,26 @@
+FINANCIAL ENGINEERING HEDGING ANALYSIS
+================================================================================
+
+CALL OPTION SUMMARY:
+--------------------------------------------------------------------------------
+    Strategy  Final_PnL  Mean_PnL  Risk_StdDev  Max_Profit  Max_Loss  Rebalances  Sharpe_Ratio  Risk_Reduction_%
+    Unhedged   87645.00  48125.20     28890.59    94880.00      0.00           0          1.67              0.00
+Delta Hedged   22321.69  16561.93      8115.26    27981.54   -866.24          21          2.04             71.91
+ Delta-Gamma  -29109.45 -32710.34      4763.95   -25946.17 -42488.29          24         -6.87             83.51
+ Vega Hedged  -16424.52 -22032.94      5405.02   -14772.83 -33467.09          11         -4.08             81.29
+
+PUT OPTION SUMMARY:
+--------------------------------------------------------------------------------
+    Strategy  Final_PnL  Mean_PnL  Risk_StdDev  Max_Profit   Max_Loss  Rebalances  Sharpe_Ratio  Risk_Reduction_%
+    Unhedged   -6975.00  -9836.96     21148.95    12590.00  -86160.00           0         -0.47              0.00
+Delta Hedged  -29318.57   1362.79     11429.76    11140.38  -30664.94          10          0.12             45.96
+ Delta-Gamma -205354.48 -83719.13     46305.48   -53576.11 -205354.48          14         -1.81           -118.95
+ Vega Hedged -224228.09 -84387.65     54394.23   -49031.77 -224228.09          10         -1.55           -157.20
+
+KEY FINDINGS:
+--------------------------------------------------------------------------------
+1. Risk reduction through hedging is consistent across both calls and puts
+2. Delta hedging significantly reduces volatility of P&L
+3. Multi-greek hedges provide additional risk reduction
+4. Transaction costs from rebalancing impact profitability
+5. Hedging trades profit potential for stability

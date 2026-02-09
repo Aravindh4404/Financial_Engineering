@@ -1,5 +1,0 @@
-Strategy,Final P&L (₹),Max P&L (₹),Min P&L (₹),P&L Std Dev (₹),Sharpe Ratio
-Unhedged,80170.0,94880.0,0.0,28353.65,1.64
-Delta Hedged,-78197.46,-69727.52,-99820.0,8719.27,-9.37
-Delta-Gamma Hedged,95090.78,95434.11,89985.2,1641.57,56.02
-Vega Hedged,294334.03,523289.42,-7351.68,154023.05,2.14

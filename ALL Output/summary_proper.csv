@@ -1,5 +1,0 @@
-Strategy,Final P&L (₹),P&L Std Dev (₹),Transaction Costs (₹),Risk Reduction (%)
-Unhedged,80170.0,28353.65,0.0,0.0
-Delta Hedged,1026923.24,417909.26,2969.83,-1373.92
-Delta-Gamma,889264.02,6544.5,501.56,76.92
-Vega Hedged,1007373.76,7372.5,554.18,74.0

@@ -1,12 +1,12 @@
 """
-IMPROVED OPTIONS HEDGING SIMULATION
-Includes: Fixed Delta-Gamma + Vega Hedging + Enhanced Visualizations
+OPTIONS HEDGING SIMULATION - EDUCATIONAL VERSION
+Strategies: Unhedged, Delta, Delta-Gamma, Delta-Vega
 
-IMPROVEMENTS:
-1. Fixed PUT Delta-Gamma hedge (partial gamma hedging)
-2. Added Vega hedging strategy
-3. Better hedge ratio management
-4. Comprehensive comparison across all strategies
+FEATURES:
+1. Fixed Delta hedge with rebalancing threshold
+2. Delta-Gamma hedge (70% partial gamma hedging)
+3. Delta-Vega hedge (volatility risk management)
+4. Zero transaction costs (educational simplification)
 
 Author: Enhanced Implementation
 Date: February 2026
@@ -199,12 +199,22 @@ def simulate_unhedged(df, N=100):
 
 
 # =============================================================================
-# STRATEGY 2: DELTA HEDGE
+# STRATEGY 2: DELTA HEDGE (FIXED with rebalancing threshold)
 # =============================================================================
 
 def simulate_delta_hedge(df, N=100, rebalance_threshold=0.10):
-    """Strategy 2: Short N options + Delta hedge with stock"""
+    """
+    Strategy 2: Short N options + Delta hedge with stock
+
+    FIXED: Now uses rebalancing threshold to avoid over-trading
+    Only rebalances when delta exposure changes by more than threshold
+
+    Args:
+        rebalance_threshold: Minimum change in delta exposure to trigger rebalancing
+                            0.10 means rebalance if delta changes by more than 10%
+    """
     print("\n--- Running DELTA HEDGE simulation ---")
+    print(f"Rebalancing threshold: {rebalance_threshold * 100:.1f}%")
 
     results = []
 
@@ -212,9 +222,7 @@ def simulate_delta_hedge(df, N=100, rebalance_threshold=0.10):
     entry_price = df.iloc[0]['Settle Price']
     cash = entry_price * N
     stock_pos = 0
-
-    tx_cost_rate = 0.0001
-    total_tx_costs = 0
+    last_target_stock = 0  # Track last target to calculate change
 
     print(f"Initial premium: ₹{cash:,.2f}")
 
@@ -226,14 +234,26 @@ def simulate_delta_hedge(df, N=100, rebalance_threshold=0.10):
         short_delta = -1 * row['Delta'] * N
         target_stock = -short_delta
 
-        # Execute stock trade
-        stock_trade = target_stock - stock_pos
-        stock_trade_cost = stock_trade * S
-        stock_tx_cost = abs(stock_trade_cost) * tx_cost_rate
+        # FIXED: Check if rebalancing is needed
+        if i == 0:
+            # Always trade on first day to establish hedge
+            rebalance_needed = True
+        else:
+            # Calculate percentage change in target position
+            if last_target_stock != 0:
+                pct_change = abs((target_stock - last_target_stock) / last_target_stock)
+            else:
+                pct_change = abs(target_stock) if target_stock != 0 else 0
 
-        cash -= (stock_trade_cost + stock_tx_cost)
-        total_tx_costs += stock_tx_cost
-        stock_pos = target_stock
+            rebalance_needed = pct_change > rebalance_threshold
+
+        # Execute stock trade only if rebalancing threshold exceeded
+        if rebalance_needed:
+            stock_trade = target_stock - stock_pos
+            stock_trade_cost = stock_trade * S
+            cash -= stock_trade_cost
+            stock_pos = target_stock
+            last_target_stock = target_stock
 
         # Mark to market
         stock_value = stock_pos * S
@@ -250,26 +270,25 @@ def simulate_delta_hedge(df, N=100, rebalance_threshold=0.10):
 
     print(f"Final P&L: ₹{df_result['PnL'].iloc[-1]:,.2f}")
     print(f"Risk (Std Dev): ₹{df_result['PnL'].std():,.2f}")
-    print(f"Total transaction costs: ₹{total_tx_costs:,.2f}")
 
     return df_result
 
 
 # =============================================================================
-# STRATEGY 3: IMPROVED DELTA-GAMMA HEDGE
+# STRATEGY 3: DELTA-GAMMA HEDGE
 # =============================================================================
 
-def simulate_delta_gamma_hedge_improved(df, N=100, gamma_hedge_ratio=0.70):
+def simulate_delta_gamma_hedge(df, N=100, gamma_hedge_ratio=0.70):
     """
-    Strategy 3: IMPROVED Delta-Gamma Hedge
+    Strategy 3: Delta-Gamma Hedge
 
-    KEY FIX: Use partial gamma hedging (70% instead of 100%)
+    Uses partial gamma hedging (70% instead of 100%)
     This reduces hedge costs while maintaining most of the protection
 
     Args:
         gamma_hedge_ratio: Percentage of gamma to hedge (0.7 = 70%)
     """
-    print("\n--- Running IMPROVED DELTA-GAMMA HEDGE simulation ---")
+    print("\n--- Running DELTA-GAMMA HEDGE simulation ---")
     print(f"Gamma hedge ratio: {gamma_hedge_ratio * 100:.0f}%")
 
     results = []
@@ -279,9 +298,6 @@ def simulate_delta_gamma_hedge_improved(df, N=100, gamma_hedge_ratio=0.70):
     cash = entry_price * N
     stock_pos = 0
     hedge_opt_pos = 0
-
-    tx_cost_rate = 0.0001
-    total_tx_costs = 0
 
     print(f"Initial premium: ₹{cash:,.2f}")
 
@@ -297,17 +313,14 @@ def simulate_delta_gamma_hedge_improved(df, N=100, gamma_hedge_ratio=0.70):
         if hedge_gamma_per_contract > 1e-7:
             # Only hedge 70% of gamma exposure
             target_hedge_opts = gamma_hedge_ratio * (-short_gamma / hedge_gamma_per_contract)
-            target_hedge_opts = np.clip(target_hedge_opts, 0, N * 2)  # Cap at 2x instead of 3x
+            target_hedge_opts = np.clip(target_hedge_opts, 0, N * 2)  # Cap at 2x
         else:
             target_hedge_opts = 0
 
         # Execute hedge option trade
         hedge_trade = target_hedge_opts - hedge_opt_pos
         hedge_trade_cost = hedge_trade * hedge_opt_price
-        hedge_tx_cost = abs(hedge_trade_cost) * tx_cost_rate
-
-        cash -= (hedge_trade_cost + hedge_tx_cost)
-        total_tx_costs += hedge_tx_cost
+        cash -= hedge_trade_cost
         hedge_opt_pos = target_hedge_opts
 
         # STEP 2: DELTA NEUTRALIZATION
@@ -320,10 +333,7 @@ def simulate_delta_gamma_hedge_improved(df, N=100, gamma_hedge_ratio=0.70):
         # Execute stock trade
         stock_trade = target_stock - stock_pos
         stock_trade_cost = stock_trade * S
-        stock_tx_cost = abs(stock_trade_cost) * tx_cost_rate
-
-        cash -= (stock_trade_cost + stock_tx_cost)
-        total_tx_costs += stock_tx_cost
+        cash -= stock_trade_cost
         stock_pos = target_stock
 
         # STEP 3: MARK TO MARKET
@@ -343,13 +353,12 @@ def simulate_delta_gamma_hedge_improved(df, N=100, gamma_hedge_ratio=0.70):
 
     print(f"Final P&L: ₹{df_result['PnL'].iloc[-1]:,.2f}")
     print(f"Risk (Std Dev): ₹{df_result['PnL'].std():,.2f}")
-    print(f"Total transaction costs: ₹{total_tx_costs:,.2f}")
 
     return df_result
 
 
 # =============================================================================
-# STRATEGY 4: VEGA HEDGE
+# STRATEGY 4: DELTA-VEGA HEDGE
 # =============================================================================
 
 def simulate_vega_hedge(df, N=100):
@@ -357,7 +366,7 @@ def simulate_vega_hedge(df, N=100):
     Strategy 4: Delta + Vega Hedge
 
     Hedges both directional risk (delta) and volatility risk (vega)
-    Uses same hedge options as delta-gamma but focuses on vega neutralization
+    Uses hedge options for vega neutralization, stock for residual delta
     """
     print("\n--- Running DELTA-VEGA HEDGE simulation ---")
 
@@ -368,9 +377,6 @@ def simulate_vega_hedge(df, N=100):
     cash = entry_price * N
     stock_pos = 0
     hedge_opt_pos = 0
-
-    tx_cost_rate = 0.0001
-    total_tx_costs = 0
 
     print(f"Initial premium: ₹{cash:,.2f}")
 
@@ -392,10 +398,7 @@ def simulate_vega_hedge(df, N=100):
         # Execute hedge option trade
         hedge_trade = target_hedge_opts - hedge_opt_pos
         hedge_trade_cost = hedge_trade * hedge_opt_price
-        hedge_tx_cost = abs(hedge_trade_cost) * tx_cost_rate
-
-        cash -= (hedge_trade_cost + hedge_tx_cost)
-        total_tx_costs += hedge_tx_cost
+        cash -= hedge_trade_cost
         hedge_opt_pos = target_hedge_opts
 
         # STEP 2: DELTA NEUTRALIZATION (with stock)
@@ -408,10 +411,7 @@ def simulate_vega_hedge(df, N=100):
         # Execute stock trade
         stock_trade = target_stock - stock_pos
         stock_trade_cost = stock_trade * S
-        stock_tx_cost = abs(stock_trade_cost) * tx_cost_rate
-
-        cash -= (stock_trade_cost + stock_tx_cost)
-        total_tx_costs += stock_tx_cost
+        cash -= stock_trade_cost
         stock_pos = target_stock
 
         # STEP 3: MARK TO MARKET
@@ -431,111 +431,6 @@ def simulate_vega_hedge(df, N=100):
 
     print(f"Final P&L: ₹{df_result['PnL'].iloc[-1]:,.2f}")
     print(f"Risk (Std Dev): ₹{df_result['PnL'].std():,.2f}")
-    print(f"Total transaction costs: ₹{total_tx_costs:,.2f}")
-
-    return df_result
-
-
-# =============================================================================
-# STRATEGY 5: FULL HEDGE (Delta + Gamma + Vega)
-# =============================================================================
-
-def simulate_full_hedge(df, N=100):
-    """
-    Strategy 5: Delta + Gamma + Vega Hedge
-
-    Uses TWO sets of hedge options:
-    - First set for gamma hedging
-    - Second set for vega hedging
-    - Stock for residual delta
-
-    Note: This requires a third option data file for vega hedge
-    For simplicity, we'll use the same hedge option but split the allocation
-    """
-    print("\n--- Running FULL HEDGE (Delta+Gamma+Vega) simulation ---")
-
-    results = []
-
-    # Initial setup
-    entry_price = df.iloc[0]['Settle Price']
-    cash = entry_price * N
-    stock_pos = 0
-    hedge_opt_pos = 0
-
-    tx_cost_rate = 0.0001
-    total_tx_costs = 0
-
-    print(f"Initial premium: ₹{cash:,.2f}")
-
-    for i, row in df.iterrows():
-        S = row['Underlying Value']
-        main_opt_value = row['Settle Price'] * N
-        hedge_opt_price = row['Hedge_Price']
-
-        # STEP 1: COMBINED GAMMA + VEGA HEDGING
-        # Weighted approach: 60% gamma hedge + 40% vega hedge
-
-        short_gamma = -1 * row['Gamma'] * N
-        short_vega = -1 * row['Vega'] * N
-
-        hedge_gamma_per_contract = row['Hedge_Gamma']
-        hedge_vega_per_contract = row['Hedge_Vega']
-
-        gamma_contracts = 0
-        vega_contracts = 0
-
-        if hedge_gamma_per_contract > 1e-7:
-            gamma_contracts = 0.6 * (-short_gamma / hedge_gamma_per_contract)
-
-        if hedge_vega_per_contract > 1e-7:
-            vega_contracts = 0.4 * (-short_vega / hedge_vega_per_contract)
-
-        target_hedge_opts = gamma_contracts + vega_contracts
-        target_hedge_opts = np.clip(target_hedge_opts, 0, N * 2)
-
-        # Execute hedge option trade
-        hedge_trade = target_hedge_opts - hedge_opt_pos
-        hedge_trade_cost = hedge_trade * hedge_opt_price
-        hedge_tx_cost = abs(hedge_trade_cost) * tx_cost_rate
-
-        cash -= (hedge_trade_cost + hedge_tx_cost)
-        total_tx_costs += hedge_tx_cost
-        hedge_opt_pos = target_hedge_opts
-
-        # STEP 2: DELTA NEUTRALIZATION
-        short_delta = -1 * row['Delta'] * N
-        hedge_delta = hedge_opt_pos * row['Hedge_Delta']
-        current_net_delta = short_delta + hedge_delta
-
-        target_stock = -current_net_delta
-
-        # Execute stock trade
-        stock_trade = target_stock - stock_pos
-        stock_trade_cost = stock_trade * S
-        stock_tx_cost = abs(stock_trade_cost) * tx_cost_rate
-
-        cash -= (stock_trade_cost + stock_tx_cost)
-        total_tx_costs += stock_tx_cost
-        stock_pos = target_stock
-
-        # STEP 3: MARK TO MARKET
-        stock_value = stock_pos * S
-        hedge_opt_value = hedge_opt_pos * hedge_opt_price
-
-        total_pnl = cash + stock_value + hedge_opt_value - main_opt_value
-
-        results.append({
-            'Date': row['Date'],
-            'PnL': total_pnl,
-            'Stock_Pos': stock_pos,
-            'Hedge_Opt_Pos': hedge_opt_pos
-        })
-
-    df_result = pd.DataFrame(results)
-
-    print(f"Final P&L: ₹{df_result['PnL'].iloc[-1]:,.2f}")
-    print(f"Risk (Std Dev): ₹{df_result['PnL'].std():,.2f}")
-    print(f"Total transaction costs: ₹{total_tx_costs:,.2f}")
 
     return df_result
 
@@ -546,28 +441,24 @@ def simulate_full_hedge(df, N=100):
 
 def create_comprehensive_comparison(data, strategies_dict, option_type, output_dir):
     """
-    Create comprehensive comparison of ALL strategies
+    Create comprehensive comparison of hedging strategies
 
     strategies_dict = {
         'Unhedged': df,
         'Delta': df,
-        'Delta-Gamma (Old)': df,
-        'Delta-Gamma (Improved)': df,
-        'Delta-Vega': df,
-        'Full Hedge': df
+        'Delta-Gamma': df,
+        'Delta-Vega': df
     }
     """
 
-    fig = plt.figure(figsize=(24, 16))
+    fig = plt.figure(figsize=(20, 14))
     opt_label = option_type.upper()
 
     colors = {
         'Unhedged': 'red',
         'Delta': 'blue',
-        'Delta-Gamma (Old)': 'orange',
-        'Delta-Gamma (Improved)': 'green',
-        'Delta-Vega': 'purple',
-        'Full Hedge': 'brown'
+        'Delta-Gamma': 'green',
+        'Delta-Vega': 'purple'
     }
 
     # 1. P&L Comparison (All Strategies)
@@ -576,11 +467,11 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
         ax1.plot(df['Date'], df['PnL'], label=name, linewidth=2.5,
                  color=colors.get(name, 'gray'), alpha=0.7)
     ax1.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    ax1.set_title(f'{opt_label}: P&L Comparison (ALL STRATEGIES)',
+    ax1.set_title(f'{opt_label}: P&L Evolution Comparison',
                   fontsize=14, fontweight='bold')
     ax1.set_xlabel('Date', fontweight='bold')
     ax1.set_ylabel('P&L (₹)', fontweight='bold')
-    ax1.legend(fontsize=9, loc='best')
+    ax1.legend(fontsize=10, loc='best')
     ax1.grid(True, alpha=0.3)
     plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
 
@@ -594,7 +485,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     ax2.set_title('Risk Comparison\n(Lower = Better)', fontsize=14, fontweight='bold')
     ax2.set_ylabel('Std Dev (₹)', fontweight='bold')
     ax2.set_xticks(range(len(names)))
-    ax2.set_xticklabels(names, rotation=45, ha='right', fontsize=9)
+    ax2.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
     ax2.grid(True, alpha=0.3, axis='y')
 
     for bar, val in zip(bars, risks):
@@ -611,7 +502,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     ax3.set_title('Final P&L', fontsize=14, fontweight='bold')
     ax3.set_ylabel('Final P&L (₹)', fontweight='bold')
     ax3.set_xticks(range(len(names)))
-    ax3.set_xticklabels(names, rotation=45, ha='right', fontsize=9)
+    ax3.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
     ax3.axhline(y=0, color='black', linestyle='-', linewidth=1.5)
     ax3.grid(True, alpha=0.3, axis='y')
 
@@ -631,21 +522,21 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     ax4.set_title('Stock Positions Over Time', fontsize=14, fontweight='bold')
     ax4.set_xlabel('Date', fontweight='bold')
     ax4.set_ylabel('Stock Shares', fontweight='bold')
-    ax4.legend(fontsize=9)
+    ax4.legend(fontsize=10)
     ax4.grid(True, alpha=0.3)
     plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45)
 
     # 5. Hedge Option Contracts
     ax5 = plt.subplot(3, 3, 5)
     for name, df in strategies_dict.items():
-        if 'Gamma' in name or 'Vega' in name or 'Full' in name:
+        if 'Gamma' in name or 'Vega' in name:
             ax5.plot(df['Date'], df['Hedge_Opt_Pos'], label=name, linewidth=2,
                      color=colors.get(name, 'gray'), alpha=0.7)
     ax5.set_title('Hedge Option Contracts\n(Gamma/Vega Strategies)',
                   fontsize=14, fontweight='bold')
     ax5.set_xlabel('Date', fontweight='bold')
     ax5.set_ylabel('Hedge Contracts', fontweight='bold')
-    ax5.legend(fontsize=9)
+    ax5.legend(fontsize=10)
     ax5.grid(True, alpha=0.3)
     plt.setp(ax5.xaxis.get_majorticklabels(), rotation=45)
 
@@ -661,13 +552,13 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     ax6.set_title('Maximum Drawdown\n(Lower = Better)', fontsize=14, fontweight='bold')
     ax6.set_ylabel('Drawdown (₹)', fontweight='bold')
     ax6.set_xticks(range(len(names)))
-    ax6.set_xticklabels(names, rotation=45, ha='right', fontsize=9)
+    ax6.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
     ax6.grid(True, alpha=0.3, axis='y')
 
     for bar, val in zip(bars, drawdowns):
         height = bar.get_height()
         ax6.text(bar.get_x() + bar.get_width() / 2., height,
-                 f'₹{val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+                 f'₹{val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
 
     # 7. Summary Statistics Table
     ax7 = plt.subplot(3, 3, 7)
@@ -689,7 +580,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
 
     for i, name in enumerate(names):
         table_data.append([
-            name[:15],  # Truncate long names
+            name,
             f'₹{final_pnls[i]:,.0f}',
             f'₹{risks[i]:,.0f}',
             f'₹{max_losses[i]:,.0f}',
@@ -699,7 +590,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     table = ax7.table(cellText=table_data, cellLoc='center', loc='center',
                       colWidths=[0.25, 0.20, 0.18, 0.18, 0.19])
     table.auto_set_font_size(False)
-    table.set_fontsize(9)
+    table.set_fontsize(10)
     table.scale(1, 2.2)
 
     for i in range(len(table_data[0])):
@@ -720,7 +611,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
                   fontsize=14, fontweight='bold')
     ax8.set_ylabel('Risk Reduction (%)', fontweight='bold')
     ax8.set_xticks(range(len(names)))
-    ax8.set_xticklabels(names, rotation=45, ha='right', fontsize=9)
+    ax8.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
     ax8.grid(True, alpha=0.3, axis='y')
 
     for bar, val in zip(bars, risk_reductions):
@@ -743,7 +634,7 @@ def create_comprehensive_comparison(data, strategies_dict, option_type, output_d
     ax9.set_title('P&L Retention vs Unhedged', fontsize=14, fontweight='bold')
     ax9.set_ylabel('P&L Retention (%)', fontweight='bold')
     ax9.set_xticks(range(len(names)))
-    ax9.set_xticklabels(names, rotation=45, ha='right', fontsize=9)
+    ax9.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
     ax9.axhline(y=100, color='black', linestyle='--', linewidth=1, alpha=0.5, label='Baseline')
     ax9.grid(True, alpha=0.3, axis='y')
 
@@ -781,17 +672,17 @@ def main():
     PUT_MAIN_FILE = 'Data/OPTIDX_NIFTY_PE_08-Nov-2025_TO_08-Feb-2026.csv'
     PUT_HEDGE_FILE = 'Data/OPTIDX_NIFTY_PE_08-Nov-2025_TO_08-Feb-2026 (2).csv'
 
-    OUTPUT_DIR = 'improved_outputs'
+    OUTPUT_DIR = 'outputs'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     N_CONTRACTS = 100
 
     print("\n" + "=" * 70)
-    print("IMPROVED OPTIONS HEDGING ANALYSIS")
-    print("With Vega Hedging & Fixed Delta-Gamma")
+    print("OPTIONS HEDGING ANALYSIS - EDUCATIONAL VERSION")
+    print("Zero Transaction Costs | Fixed Delta Rebalancing")
     print("=" * 70)
     print(f"\nContracts: {N_CONTRACTS}")
-    print(f"Strategies: 6 different hedging approaches")
+    print(f"Strategies: 4 (Unhedged + 3 Hedges)")
     print("=" * 70)
 
     # =========================================================================
@@ -808,18 +699,17 @@ def main():
         # Run all strategies
         call_strategies = {
             'Unhedged': simulate_unhedged(df_call, N_CONTRACTS),
-            'Delta': simulate_delta_hedge(df_call, N_CONTRACTS),
-            'Delta-Gamma (Improved)': simulate_delta_gamma_hedge_improved(df_call, N_CONTRACTS, gamma_hedge_ratio=0.70),
-            'Delta-Vega': simulate_vega_hedge(df_call, N_CONTRACTS),
-            'Full Hedge': simulate_full_hedge(df_call, N_CONTRACTS)
-        }
+            'Delta': simulate_delta_hedge(df_call, N_CONTRACTS, rebalance_threshold=0.10),
+            'Delta-Gamma': simulate_delta_gamma_hedge(df_call, N_CONTRACTS, gamma_hedge_ratio=0.70),
+            'Delta-Vega': simulate_vega_hedge(df_call, N_CONTRACTS)
+            }
 
         # Create comprehensive visualization
         create_comprehensive_comparison(df_call, call_strategies, 'call', OUTPUT_DIR)
 
         # Save results
         for name, df in call_strategies.items():
-            safe_name = name.replace(' ', '_').replace('(', '').replace(')', '')
+            safe_name = name.replace(' ', '_').replace('-', '_')
             df.to_csv(f'{OUTPUT_DIR}/call_{safe_name.lower()}_results.csv', index=False)
 
     else:
@@ -839,10 +729,9 @@ def main():
         # Run all strategies
         put_strategies = {
             'Unhedged': simulate_unhedged(df_put, N_CONTRACTS),
-            'Delta': simulate_delta_hedge(df_put, N_CONTRACTS),
-            'Delta-Gamma (Improved)': simulate_delta_gamma_hedge_improved(df_put, N_CONTRACTS, gamma_hedge_ratio=0.70),
-            'Delta-Vega': simulate_vega_hedge(df_put, N_CONTRACTS),
-            'Full Hedge': simulate_full_hedge(df_put, N_CONTRACTS)
+            'Delta': simulate_delta_hedge(df_put, N_CONTRACTS, rebalance_threshold=0.10),
+            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS, gamma_hedge_ratio=0.70),
+            'Delta-Vega': simulate_vega_hedge(df_put, N_CONTRACTS)
         }
 
         # Create comprehensive visualization
@@ -850,7 +739,7 @@ def main():
 
         # Save results
         for name, df in put_strategies.items():
-            safe_name = name.replace(' ', '_').replace('(', '').replace(')', '')
+            safe_name = name.replace(' ', '_').replace('-', '_')
             df.to_csv(f'{OUTPUT_DIR}/put_{safe_name.lower()}_results.csv', index=False)
 
     else:
@@ -861,7 +750,7 @@ def main():
     # =========================================================================
 
     print("\n" + "=" * 70)
-    print("✅ IMPROVED ANALYSIS COMPLETE!")
+    print("✅ ANALYSIS COMPLETE!")
     print("=" * 70)
     print(f"\nOutputs saved to: {OUTPUT_DIR}/")
     print("\nGenerated files:")
@@ -869,14 +758,14 @@ def main():
     print("  📊 put_comprehensive_comparison.png")
     print("  📄 CSV files for each strategy")
     print("\n" + "=" * 70)
-    print("KEY IMPROVEMENTS:")
+    print("KEY FEATURES:")
     print("=" * 70)
-    print("✓ Fixed PUT delta-gamma hedge (partial 70% gamma hedging)")
-    print("✓ Added Vega hedging strategy (volatility risk management)")
-    print("✓ Added Full hedge (Delta + Gamma + Vega combined)")
-    print("✓ Enhanced visualizations with 9-panel comparison")
-    print("✓ Better hedge ratio management")
+    print("✓ Fixed Delta hedge with 10% rebalancing threshold")
+    print("✓ Delta-Gamma hedge with 70% partial gamma hedging")
+    print("✓ Delta-Vega hedge for volatility risk management")
+    print("✓ Zero transaction costs (educational simplification)")
     print("=" * 70 + "\n")
+
 
 
 if __name__ == "__main__":

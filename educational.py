@@ -702,7 +702,7 @@ def main():
         put_strategies = {
             'Unhedged': simulate_unhedged(df_put, N_CONTRACTS),
             'Delta': simulate_delta_hedge(df_put, N_CONTRACTS, rebalance_threshold=0.10),
-            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS, gamma_hedge_ratio=0.70),
+            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS, gamma_hedge_ratio=1.0),
             'Delta-Vega': simulate_vega_hedge(df_put, N_CONTRACTS)
         }
 

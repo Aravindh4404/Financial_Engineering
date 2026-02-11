@@ -46,14 +46,20 @@ class BlackScholes:
         )
 
     def delta(self):
-        return self.bs.callDelta if self.type == 'call' else self.bs.putDelta
+        # mibian returns positive deltas for both calls and puts
+        # But puts should have negative delta by convention
+        raw_delta = self.bs.callDelta if self.type == 'call' else self.bs.putDelta
+
+        # FIX: Convert PUT delta to negative if mibian returns positive
+        if self.type == 'put' and raw_delta > 0:
+            return -raw_delta
+        return raw_delta
 
     def gamma(self):
         return self.bs.gamma
 
     def vega(self):
         return self.bs.vega
-
 
 def calculate_implied_vol(price, S, K, T, r, option_type, fallback_iv=0.20):
     """Calculate IV from option price"""
@@ -166,17 +172,22 @@ def load_and_prepare_data(main_file, hedge_file, option_type, r=0.065):
 # SIMULATION FUNCTIONS WITH TRADE TRACKING
 # =============================================================================
 
-def simulate_unhedged(df, N=100):
+def simulate_unhedged(df, N=100, r=0.065):  # ADD r parameter
     """Strategy 1: Short N options, no hedge"""
     print("\n--- Running UNHEDGED simulation ---")
 
     results = []
     entry_price = df.iloc[0]['Settle Price']
-    premium_received = entry_price * N
+    cash = entry_price * N  # CHANGE: was premium_received
 
     for i, row in df.iterrows():
+        # ADD THESE 3 LINES - Apply risk-free rate to cash
+        if i > 0:
+            days = (row['Date'] - df.iloc[i - 1]['Date']).days
+            cash *= np.exp(r * days / 365)
+
         current_value = row['Settle Price'] * N
-        pnl = premium_received - current_value
+        pnl = cash - current_value  # CHANGE: was premium_received
 
         results.append({
             'Date': row['Date'],
@@ -192,7 +203,7 @@ def simulate_unhedged(df, N=100):
     return df_result
 
 
-def simulate_delta_hedge(df, N=100, rebalance_threshold=0.20):
+def simulate_delta_hedge(df, N=100, rebalance_threshold=0.20, r=0.065):  # ADD r parameter
     """Strategy 2: Short N options + Delta hedge with stock - TRACKS TRADES"""
     print("\n--- Running DELTA HEDGE simulation ---")
     print(f"Rebalancing threshold: {rebalance_threshold * 100:.1f}%")
@@ -204,6 +215,11 @@ def simulate_delta_hedge(df, N=100, rebalance_threshold=0.20):
     last_target_stock = 0
 
     for i, row in df.iterrows():
+        # ADD THESE 3 LINES - Apply risk-free rate to cash
+        if i > 0:
+            days = (row['Date'] - df.iloc[i - 1]['Date']).days
+            cash *= np.exp(r * days / 365)
+
         S = row['Underlying Value']
         main_opt_value = row['Settle Price'] * N
 
@@ -248,32 +264,50 @@ def simulate_delta_hedge(df, N=100, rebalance_threshold=0.20):
     return df_result
 
 
-def simulate_delta_gamma_hedge(df, N=100):
-    """
-    Delta-Gamma Hedge: DAILY rebalancing
-
-    This is the TRUE gamma hedge - rebalance every single day
-    to capture gamma (how delta changes over time)
-
-    Gamma measures convexity, so frequent rebalancing
-    captures the benefit of being long/short gamma
-    """
-    print("\n--- Running DELTA-GAMMA HEDGE (Daily Rebalancing) ---")
+def simulate_delta_gamma_hedge(df, N=100, gamma_hedge_ratio=0.70, r=0.065):  # ADD r parameter
+    """Strategy 3: Delta-Gamma Hedge - TRACKS TRADES"""
+    print("\n--- Running DELTA-GAMMA HEDGE simulation ---")
+    print(f"Gamma hedge ratio: {gamma_hedge_ratio * 100:.0f}%")
 
     results = []
     entry_price = df.iloc[0]['Settle Price']
     cash = entry_price * N
     stock_pos = 0
+    hedge_opt_pos = 0
 
     for i, row in df.iterrows():
+        # ADD THESE 3 LINES - Apply risk-free rate to cash
+        if i > 0:
+            days = (row['Date'] - df.iloc[i - 1]['Date']).days
+            cash *= np.exp(r * days / 365)
+
         S = row['Underlying Value']
         main_opt_value = row['Settle Price'] * N
+        hedge_opt_price = row['Hedge_Price']
 
-        # Calculate current delta exposure
+        # STEP 1: Gamma neutralization
+        short_gamma = -1 * row['Gamma'] * N
+        hedge_gamma_per_contract = row['Hedge_Gamma']
+
+        if hedge_gamma_per_contract > 1e-7:
+            target_hedge_opts = gamma_hedge_ratio * (-short_gamma / hedge_gamma_per_contract)
+            target_hedge_opts = np.clip(target_hedge_opts, 0, N * 2)
+        else:
+            target_hedge_opts = 0
+
+        # Execute hedge option trade
+        hedge_trade = target_hedge_opts - hedge_opt_pos
+        hedge_trade_cost = hedge_trade * hedge_opt_price
+        cash -= hedge_trade_cost
+        hedge_opt_pos = target_hedge_opts
+
+        # STEP 2: Delta neutralization
         short_delta = -1 * row['Delta'] * N
-        target_stock = -short_delta
+        hedge_delta = hedge_opt_pos * row['Hedge_Delta']
+        current_net_delta = short_delta + hedge_delta
+        target_stock = -current_net_delta
 
-        # REBALANCE EVERY DAY (key difference from delta hedge)
+        # Execute stock trade
         stock_trade = target_stock - stock_pos
         stock_trade_cost = stock_trade * S
         cash -= stock_trade_cost
@@ -281,23 +315,24 @@ def simulate_delta_gamma_hedge(df, N=100):
 
         # Mark to market
         stock_value = stock_pos * S
-        total_pnl = cash + stock_value - main_opt_value
+        hedge_opt_value = hedge_opt_pos * hedge_opt_price
+        total_pnl = cash + stock_value + hedge_opt_value - main_opt_value
 
         results.append({
             'Date': row['Date'],
             'PnL': total_pnl,
             'Stock_Pos': stock_pos,
-            'Hedge_Opt_Pos': 0,
+            'Hedge_Opt_Pos': hedge_opt_pos,
             'Stock_Trade': abs(stock_trade),
-            'Hedge_Trade': 0
+            'Hedge_Trade': abs(hedge_trade)
         })
 
     df_result = pd.DataFrame(results)
     print(f"Final P&L: ₹{df_result['PnL'].iloc[-1]:,.2f}")
-    print(f"Rebalanced EVERY day ({len(df_result)} times)")
-
     return df_result
-def simulate_vega_hedge(df, N=100):
+
+
+def simulate_vega_hedge(df, N=100, r=0.065):  # ADD r parameter
     """Strategy 4: Delta + Vega Hedge - TRACKS TRADES"""
     print("\n--- Running DELTA-VEGA HEDGE simulation ---")
 
@@ -308,6 +343,11 @@ def simulate_vega_hedge(df, N=100):
     hedge_opt_pos = 0
 
     for i, row in df.iterrows():
+        # ADD THESE 3 LINES - Apply risk-free rate to cash
+        if i > 0:
+            days = (row['Date'] - df.iloc[i - 1]['Date']).days
+            cash *= np.exp(r * days / 365)
+
         S = row['Underlying Value']
         main_opt_value = row['Settle Price'] * N
         hedge_opt_price = row['Hedge_Price']
@@ -648,7 +688,7 @@ def main():
         call_strategies = {
             'Unhedged': simulate_unhedged(df_call, N_CONTRACTS),
             'Delta': simulate_delta_hedge(df_call, N_CONTRACTS, rebalance_threshold=0.20),
-            'Delta-Gamma': simulate_delta_gamma_hedge(df_call, N_CONTRACTS),
+            'Delta-Gamma': simulate_delta_gamma_hedge(df_call, N_CONTRACTS, gamma_hedge_ratio=0.70),
             'Delta-Vega': simulate_vega_hedge(df_call, N_CONTRACTS)
         }
 
@@ -684,28 +724,25 @@ def main():
 
         df_put = load_and_prepare_data(PUT_MAIN_FILE, PUT_HEDGE_FILE, 'put')
 
+        # DIAGNOSTIC: Check PUT delta values
+        print("\n" + "=" * 70)
+        print("DIAGNOSTIC: PUT DELTA VALUES")
+        print("=" * 70)
+        print(f"First 5 PUT Deltas: {df_put['Delta'].head().tolist()}")
+        print(f"PUT Delta range: [{df_put['Delta'].min():.4f}, {df_put['Delta'].max():.4f}]")
+        print(f"First PUT price: ₹{df_put['Settle Price'].iloc[0]:.2f}")
+        print(f"First underlying: ₹{df_put['Underlying Value'].iloc[0]:.2f}")
+        print(f"PUT Strike: {df_put['Strike Price'].iloc[0]}")
+        print("=" * 70)
+
         # Run strategies
         put_strategies = {
             'Unhedged': simulate_unhedged(df_put, N_CONTRACTS),
             'Delta': simulate_delta_hedge(df_put, N_CONTRACTS, rebalance_threshold=0.20),
-            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS),
+            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS, gamma_hedge_ratio=1.0),
             'Delta-Vega': simulate_vega_hedge(df_put, N_CONTRACTS)
         }
 
-        print("\n" + "=" * 70)
-        print("CREATING PUT VISUALIZATIONS")
-        print("=" * 70)
-
-
-        df_put = load_and_prepare_data(PUT_MAIN_FILE, PUT_HEDGE_FILE, 'put')
-
-        # Run strategies
-        put_strategies = {
-            'Unhedged': simulate_unhedged(df_put, N_CONTRACTS),
-            'Delta': simulate_delta_hedge(df_put, N_CONTRACTS, rebalance_threshold=0.2),
-            'Delta-Gamma': simulate_delta_gamma_hedge(df_put, N_CONTRACTS),
-            'Delta-Vega': simulate_vega_hedge(df_put, N_CONTRACTS)
-        }
 
         print("\n" + "=" * 70)
         print("CREATING PUT VISUALIZATIONS")
